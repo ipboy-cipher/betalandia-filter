@@ -1,0 +1,215 @@
+const express = require("express");
+
+const app = express();
+
+app.use(express.json({ limit: "1mb" }));
+
+const PORT = process.env.PORT || 3000;
+
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
+
+const BETALANDIA_GROUP_JID =
+  process.env.BETALANDIA_GROUP_JID ||
+  "120363430626519695@g.us";
+
+if (!N8N_WEBHOOK_URL) {
+  console.warn("⚠️ N8N_WEBHOOK_URL não está configurada.");
+}
+
+/*
+ * Extrai o texto de diferentes tipos de mensagem
+ * enviados pela Evolution API.
+ */
+function getMessageText(data) {
+  const message = data?.data?.message;
+
+  if (!message) {
+    return "";
+  }
+
+  if (typeof message.conversation === "string") {
+    return message.conversation;
+  }
+
+  if (message.extendedTextMessage?.text) {
+    return message.extendedTextMessage.text;
+  }
+
+  if (message.imageMessage?.caption) {
+    return message.imageMessage.caption;
+  }
+
+  if (message.videoMessage?.caption) {
+    return message.videoMessage.caption;
+  }
+
+  return "";
+}
+
+/*
+ * Verifica se a mensagem chama explicitamente o bot.
+ *
+ * Exemplos aceitos:
+ *
+ * Bot
+ * bot
+ * BOT
+ * Bot, olá
+ * Bot: ajuda
+ * Bot oq é água?
+ */
+function isBotCommand(text) {
+  const normalized = text
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return /^bot(?:\s|[,:;.!?]|$)/i.test(normalized);
+}
+
+/*
+ * Health check.
+ */
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "online",
+    service: "Betalandia Filter",
+    version: "1.0.0"
+  });
+});
+
+/*
+ * Endpoint que receberá os eventos da Evolution API.
+ */
+app.post("/webhook", async (req, res) => {
+  try {
+    const payload = req.body;
+
+    const event = payload?.event;
+    const instance = payload?.instance;
+    const key = payload?.data?.key;
+
+    const remoteJid = key?.remoteJid;
+    const fromMe = key?.fromMe;
+
+    const messageText = getMessageText(payload);
+
+    console.log("📩 Evento recebido:", event);
+    console.log("👥 Grupo:", remoteJid);
+    console.log("🤖 fromMe:", fromMe);
+    console.log("💬 Mensagem:", messageText);
+
+    /*
+     * 1. Só aceitamos messages.upsert.
+     */
+    if (event !== "messages.upsert") {
+      console.log("⛔ Evento ignorado:", event);
+
+      return res.status(200).json({
+        accepted: false,
+        reason: "event_not_supported"
+      });
+    }
+
+    /*
+     * 2. Ignora mensagens enviadas pela própria conta
+     * da Evolution API.
+     */
+    if (fromMe === true) {
+      console.log("⛔ Mensagem enviada pelo próprio bot.");
+
+      return res.status(200).json({
+        accepted: false,
+        reason: "message_from_bot"
+      });
+    }
+
+    /*
+     * 3. Só aceita mensagens do grupo Betalandia.
+     */
+    if (remoteJid !== BETALANDIA_GROUP_JID) {
+      console.log("⛔ Mensagem de outro chat.");
+
+      return res.status(200).json({
+        accepted: false,
+        reason: "wrong_group"
+      });
+    }
+
+    /*
+     * 4. Só aceita mensagens que começam com "bot".
+     */
+    if (!isBotCommand(messageText)) {
+      console.log("⛔ Mensagem não destinada ao bot.");
+
+      return res.status(200).json({
+        accepted: false,
+        reason: "not_bot_command"
+      });
+    }
+
+    /*
+     * 5. Se chegou aqui, a mensagem passou pelo filtro.
+     */
+    console.log("✅ MENSAGEM APROVADA → encaminhando para n8n");
+
+    if (!N8N_WEBHOOK_URL) {
+      console.error("❌ N8N_WEBHOOK_URL não configurada.");
+
+      return res.status(500).json({
+        accepted: false,
+        reason: "n8n_url_not_configured"
+      });
+    }
+
+    /*
+     * Encaminha o payload original para o n8n.
+     *
+     * Assim, o workflow existente continua recebendo
+     * exatamente a estrutura que já conhece.
+     */
+    const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const responseText = await n8nResponse.text();
+
+    console.log(
+      `📤 n8n respondeu: ${n8nResponse.status}`
+    );
+
+    if (!n8nResponse.ok) {
+      console.error("❌ Erro ao encaminhar para n8n:", responseText);
+
+      return res.status(502).json({
+        accepted: true,
+        forwarded: false,
+        n8nStatus: n8nResponse.status
+      });
+    }
+
+    return res.status(200).json({
+      accepted: true,
+      forwarded: true
+    });
+
+  } catch (error) {
+    console.error("🔥 Erro no filtro:", error);
+
+    return res.status(500).json({
+      accepted: false,
+      error: "internal_server_error"
+    });
+  }
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Betalandia Filter rodando na porta ${PORT}`);
+});
