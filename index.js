@@ -8,9 +8,13 @@ const PORT = process.env.PORT || 3000;
 
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
 
-const BETALANDIA_GROUP_JID =
+const BETALANDIA_GROUP_JIDS = (
   process.env.BETALANDIA_GROUP_JID ||
-  "120363430626519695@g.us";
+  "120363430626519695@g.us"
+)
+  .split(",")
+  .map(jid => jid.trim())
+  .filter(Boolean);
 
 if (!N8N_WEBHOOK_URL) {
   console.warn("⚠️ N8N_WEBHOOK_URL não está configurada.");
@@ -130,14 +134,14 @@ app.post("/webhook", async (req, res) => {
     /*
      * 3. Só aceita mensagens do grupo Betalandia.
      */
-    if (remoteJid !== BETALANDIA_GROUP_JID) {
-      console.log("⛔ Mensagem de outro chat.");
+    if (!BETALANDIA_GROUP_JIDS.includes(remoteJid)) {
+  console.log("⛔ Mensagem de outro chat.");
 
-      return res.status(200).json({
-        accepted: false,
-        reason: "wrong_group"
-      });
-    }
+  return res.status(200).json({
+    accepted: false,
+    reason: "wrong_group"
+  });
+}
 
     /*
      * 4. Só aceita mensagens que começam com "bot".
