@@ -25,31 +25,57 @@ if (!N8N_WEBHOOK_URL) {
  * enviados pela Evolution API.
  */
 function getMessageText(data) {
-  const message = data?.data?.message;
+  let message = data?.data?.message;
 
   if (!message) {
     return "";
   }
 
+  // Desembrulha mensagens encapsuladas
+  // pela Evolution API / WhatsApp
+  if (message.ephemeralMessage?.message) {
+    message = message.ephemeralMessage.message;
+  }
+
+  if (message.viewOnceMessage?.message) {
+    message = message.viewOnceMessage.message;
+  }
+
+  if (message.viewOnceMessageV2?.message) {
+    message = message.viewOnceMessageV2.message;
+  }
+
+  if (message.documentWithCaptionMessage?.message) {
+    message = message.documentWithCaptionMessage.message;
+  }
+
+  // Mensagem de texto simples
   if (typeof message.conversation === "string") {
     return message.conversation;
   }
 
-  if (message.extendedTextMessage?.text) {
+  // Texto expandido
+  if (typeof message.extendedTextMessage?.text === "string") {
     return message.extendedTextMessage.text;
   }
 
-  if (message.imageMessage?.caption) {
+  // Legenda de imagem
+  if (typeof message.imageMessage?.caption === "string") {
     return message.imageMessage.caption;
   }
 
-  if (message.videoMessage?.caption) {
+  // Legenda de vídeo
+  if (typeof message.videoMessage?.caption === "string") {
     return message.videoMessage.caption;
+  }
+
+  // Legenda de documento
+  if (typeof message.documentMessage?.caption === "string") {
+    return message.documentMessage.caption;
   }
 
   return "";
 }
-
 /*
  * Verifica se a mensagem chama explicitamente o bot.
  *
@@ -100,6 +126,11 @@ app.post("/webhook", async (req, res) => {
     const fromMe = key?.fromMe;
 
     const messageText = getMessageText(payload);
+    
+    console.log(
+  "🧩 Tipo da mensagem:",
+  Object.keys(payload?.data?.message || {})
+);
 
     console.log("📩 Evento recebido:", event);
     console.log("👥 Grupo:", remoteJid);
