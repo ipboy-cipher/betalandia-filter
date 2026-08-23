@@ -138,17 +138,20 @@ app.post("/webhook", async (req, res) => {
     console.log("💬 Mensagem:", messageText);
 
     /*
-     * 1. Só aceitamos messages.upsert.
+     * 1. Só aceitamos messages.upsert e group participant update.
      */
-    if (event !== "messages.upsert") {
-      console.log("⛔ Evento ignorado:", event);
+    
+if (
+  event !== "messages.upsert" &&
+  event !== "group.participants.update"
+) {
+  console.log("⛔ Evento ignorado:", event);
 
-      return res.status(200).json({
-        accepted: false,
-        reason: "event_not_supported"
-      });
-    }
-
+  return res.status(200).json({
+    accepted: false,
+    reason: "event_not_supported"
+  });
+}
     /*
      * 2. Ignora mensagens enviadas pela própria conta
      * da Evolution API.
