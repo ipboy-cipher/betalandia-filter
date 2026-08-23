@@ -8,76 +8,62 @@ const PORT = process.env.PORT || 3000;
 
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
 
-const BETALANDIA_GROUP_JIDS = (
-  process.env.BETALANDIA_GROUP_JID ||
-  "120363430626519695@g.us"
+/*
+ * Grupos onde o BETA BOT está autorizado a funcionar.
+ *
+ * Também podes colocar os JIDs na variável de ambiente:
+ *
+ * GROUP_JIDS=
+ * 120363430626519695@g.us,120363428797292558@g.us
+ *
+ * Se a variável não existir, estes dois grupos serão usados.
+ */
+const GROUP_JIDS = (
+  process.env.GROUP_JIDS ||
+  "120363430626519695@g.us,120363428797292558@g.us"
 )
   .split(",")
-  .map(jid => jid.trim())
+  .map((jid) => jid.trim())
   .filter(Boolean);
 
 if (!N8N_WEBHOOK_URL) {
   console.warn("⚠️ N8N_WEBHOOK_URL não está configurada.");
 }
 
+console.log("👥 Grupos autorizados:", GROUP_JIDS);
+
 /*
  * Extrai o texto de diferentes tipos de mensagem
  * enviados pela Evolution API.
  */
 function getMessageText(data) {
-  let message = data?.data?.message;
+  const message = data?.data?.message;
 
   if (!message) {
     return "";
   }
 
-  // Desembrulha mensagens encapsuladas
-  // pela Evolution API / WhatsApp
-  if (message.ephemeralMessage?.message) {
-    message = message.ephemeralMessage.message;
-  }
-
-  if (message.viewOnceMessage?.message) {
-    message = message.viewOnceMessage.message;
-  }
-
-  if (message.viewOnceMessageV2?.message) {
-    message = message.viewOnceMessageV2.message;
-  }
-
-  if (message.documentWithCaptionMessage?.message) {
-    message = message.documentWithCaptionMessage.message;
-  }
-
-  // Mensagem de texto simples
   if (typeof message.conversation === "string") {
     return message.conversation;
   }
 
-  // Texto expandido
-  if (typeof message.extendedTextMessage?.text === "string") {
+  if (message.extendedTextMessage?.text) {
     return message.extendedTextMessage.text;
   }
 
-  // Legenda de imagem
-  if (typeof message.imageMessage?.caption === "string") {
+  if (message.imageMessage?.caption) {
     return message.imageMessage.caption;
   }
 
-  // Legenda de vídeo
-  if (typeof message.videoMessage?.caption === "string") {
+  if (message.videoMessage?.caption) {
     return message.videoMessage.caption;
-  }
-
-  // Legenda de documento
-  if (typeof message.documentMessage?.caption === "string") {
-    return message.documentMessage.caption;
   }
 
   return "";
 }
+
 /*
- * Verifica se a mensagem chama explicitamente o bot.
+ * Verifica se a mensagem chama explicitamente o BETA BOT.
  *
  * Exemplos aceitos:
  *
@@ -89,9 +75,7 @@ function getMessageText(data) {
  * Bot oq é água?
  */
 function isBotCommand(text) {
-  const normalized = text
-    .trim()
-    .toLowerCase();
+  const normalized = text.trim().toLowerCase();
 
   if (!normalized) {
     return false;
@@ -101,18 +85,42 @@ function isBotCommand(text) {
 }
 
 /*
+ * Obtém o JID do grupo dependendo do tipo de evento.
+ *
+ * messages.upsert:
+ * data.key.remoteJid
+ *
+ * group-participants.update:
+ * data.id
+ */
+function getGroupJid(payload) {
+  const event = payload?.event;
+
+  if (event === "messages.upsert") {
+    return payload?.data?.key?.remoteJid || "";
+  }
+
+  if (event === "group-participants.update") {
+    return payload?.data?.id || "";
+  }
+
+  return "";
+}
+
+/*
  * Health check.
  */
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "online",
-    service: "Betalandia Filter",
-    version: "1.0.0"
+    service: "BETA Bot Filter",
+    version: "2.0.0",
+    groups: GROUP_JIDS
   });
 });
 
 /*
- * Endpoint que receberá os eventos da Evolution API.
+ * Endpoint que recebe os eventos da Evolution API.
  */
 app.post("/webhook", async (req, res) => {
   try {
@@ -120,43 +128,57 @@ app.post("/webhook", async (req, res) => {
 
     const event = payload?.event;
     const instance = payload?.instance;
+
     const key = payload?.data?.key;
 
-    const remoteJid = key?.remoteJid;
-    const fromMe = key?.fromMe;
+    const remoteJid = getGroupJid(payload);
+
+    const fromMe = key?.fromMe === true;
 
     const messageText = getMessageText(payload);
-    
-    console.log(
-  "🧩 Tipo da mensagem:",
-  Object.keys(payload?.data?.message || {})
-);
 
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📩 Evento recebido:", event);
+    console.log("🤖 Instância:", instance);
     console.log("👥 Grupo:", remoteJid);
     console.log("🤖 fromMe:", fromMe);
-    console.log("💬 Mensagem:", messageText);
+
+    if (messageText) {
+      console.log("💬 Mensagem:", messageText);
+    }
 
     /*
-     * 1. Só aceitamos messages.upsert e group participant update.
+     * 1. Aceitamos somente os eventos necessários.
+     *
+     * IMPORTANTE:
+     * A Evolution está enviando:
+     *
+     * messages.upsert
+     *
+     * group-participants.update
      */
-    
-if (
-  event !== "messages.upsert" &&
-  event !== "group.participants.update"
-) {
-  console.log("⛔ Evento ignorado:", event);
+    const supportedEvents = [
+      "messages.upsert",
+      "group-participants.update"
+    ];
 
-  return res.status(200).json({
-    accepted: false,
-    reason: "event_not_supported"
-  });
-}
+    if (!supportedEvents.includes(event)) {
+      console.log("⛔ Evento ignorado:", event);
+
+      return res.status(200).json({
+        accepted: false,
+        reason: "event_not_supported"
+      });
+    }
+
     /*
      * 2. Ignora mensagens enviadas pela própria conta
      * da Evolution API.
+     *
+     * Essa verificação é aplicada principalmente
+     * aos eventos messages.upsert.
      */
-    if (fromMe === true) {
+    if (event === "messages.upsert" && fromMe) {
       console.log("⛔ Mensagem enviada pelo próprio bot.");
 
       return res.status(200).json({
@@ -166,34 +188,77 @@ if (
     }
 
     /*
-     * 3. Só aceita mensagens do grupo Betalandia.
+     * 3. Verifica se o evento pertence a um dos grupos
+     * autorizados.
      */
-    if (!BETALANDIA_GROUP_JIDS.includes(remoteJid)) {
-  console.log("⛔ Mensagem de outro chat.");
-
-  return res.status(200).json({
-    accepted: false,
-    reason: "wrong_group"
-  });
-}
-
-    /*
-     * 4. Só aceita mensagens que começam com "bot".
-     */
-    if (!isBotCommand(messageText)) {
-      console.log("⛔ Mensagem não destinada ao bot.");
+    if (!GROUP_JIDS.includes(remoteJid)) {
+      console.log("⛔ Mensagem/evento de outro grupo:", remoteJid);
 
       return res.status(200).json({
         accepted: false,
-        reason: "not_bot_command"
+        reason: "wrong_group",
+        group: remoteJid
       });
     }
 
     /*
-     * 5. Se chegou aqui, a mensagem passou pelo filtro.
+     * 4. TRATAMENTO DE MENSAGENS
+     *
+     * Somente mensagens que começam com "Bot"
+     * continuam para o n8n.
      */
-    console.log("✅ MENSAGEM APROVADA → encaminhando para n8n");
+    if (event === "messages.upsert") {
+      if (!isBotCommand(messageText)) {
+        console.log("⛔ Mensagem não destinada ao BETA BOT.");
 
+        return res.status(200).json({
+          accepted: false,
+          reason: "not_bot_command"
+        });
+      }
+
+      console.log("✅ COMANDO DO BETA BOT APROVADO.");
+    }
+
+    /*
+     * 5. TRATAMENTO DE ENTRADA DE MEMBROS
+     *
+     * A Evolution envia:
+     *
+     * event:
+     * group-participants.update
+     *
+     * data.action:
+     * add
+     */
+    if (event === "group-participants.update") {
+      const action = payload?.data?.action;
+
+      console.log("👤 Ação de participante:", action);
+
+      /*
+       * Só encaminhamos entradas de novos membros.
+       */
+      if (action !== "add") {
+        console.log("⛔ Evento de participante ignorado:", action);
+
+        return res.status(200).json({
+          accepted: false,
+          reason: "participant_action_not_supported",
+          action
+        });
+      }
+
+      console.log("🎉 NOVO MEMBRO DETECTADO!");
+      console.log(
+        "👤 Participantes:",
+        JSON.stringify(payload?.data?.participants || [])
+      );
+    }
+
+    /*
+     * 6. Verifica se o endereço do n8n existe.
+     */
     if (!N8N_WEBHOOK_URL) {
       console.error("❌ N8N_WEBHOOK_URL não configurada.");
 
@@ -204,11 +269,20 @@ if (
     }
 
     /*
-     * Encaminha o payload original para o n8n.
+     * 7. Encaminha o payload original para o n8n.
      *
-     * Assim, o workflow existente continua recebendo
-     * exatamente a estrutura que já conhece.
+     * Isso é importante porque o n8n receberá:
+     *
+     * messages.upsert
+     *
+     * OU
+     *
+     * group-participants.update
+     *
+     * exatamente como a Evolution enviou.
      */
+    console.log("📤 Encaminhando evento para o n8n...");
+
     const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
       method: "POST",
       headers: {
@@ -223,8 +297,18 @@ if (
       `📤 n8n respondeu: ${n8nResponse.status}`
     );
 
+    if (responseText) {
+      console.log("📨 Resposta do n8n:", responseText);
+    }
+
+    /*
+     * 8. Se o n8n retornar erro.
+     */
     if (!n8nResponse.ok) {
-      console.error("❌ Erro ao encaminhar para n8n:", responseText);
+      console.error(
+        "❌ Erro ao encaminhar para n8n:",
+        responseText
+      );
 
       return res.status(502).json({
         accepted: true,
@@ -233,9 +317,17 @@ if (
       });
     }
 
+    /*
+     * 9. Sucesso.
+     */
+    console.log("✅ EVENTO ENCAMINHADO PARA O N8N COM SUCESSO.");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
     return res.status(200).json({
       accepted: true,
-      forwarded: true
+      forwarded: true,
+      event,
+      group: remoteJid
     });
 
   } catch (error) {
@@ -248,6 +340,21 @@ if (
   }
 });
 
+/*
+ * Inicia o servidor.
+ */
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Betalandia Filter rodando na porta ${PORT}`);
+  console.log(
+    `🚀 BETA Bot Filter rodando na porta ${PORT}`
+  );
+
+  console.log(
+    "📡 Endpoint:",
+    "/webhook"
+  );
+
+  console.log(
+    "👥 Grupos autorizados:",
+    GROUP_JIDS.join(" | ")
+  );
 });
