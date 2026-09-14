@@ -20,7 +20,7 @@ const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
  */
 const GROUP_JIDS = (
   process.env.GROUP_JIDS ||
-  "120363430626519695@g.us,120363428797292558@g.us"
+  "120363430626519695@g.us"
 )
   .split(",")
   .map((jid) => jid.trim())
