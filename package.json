@@ -1,13 +1,13 @@
 {
   "name": "betalandia-filter",
-  "version": "1.0.0",
-  "description": "Filtro de mensagens para o Betalandia Bot",
+  "version": "2.1.0",
+  "description": "Filtro de mensagens e eventos WhatsApp para o BETA BOT, integrado com Evolution API e n8n",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "express": "^4.21.2"
