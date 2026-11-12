@@ -28,7 +28,7 @@ const configuredGroups = process.env.GROUP_JIDS;
 const GROUP_JIDS = (
   configuredGroups !== undefined && configuredGroups.trim() !== ""
     ? configuredGroups
-    : "120363430626519695@g.us,120363429708834512@g.us,120363431774163794@g.us"
+    : "120363430626519695@g.us,120363429708834512@g.us,120363431774163794@g.us,120363321485602444@g.us"
 )
   .split(",")
   .map(normalizeJid)
